@@ -15,7 +15,7 @@
  */
 
 plugins {
-    kotlin("jvm") version("1.9.0")
+    kotlin("jvm") version("1.9.23")
     `kotlin-dsl`
     `maven-publish`
     groovy
