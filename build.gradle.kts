@@ -21,8 +21,8 @@ plugins {
     groovy
 }
 
-group = "dev.deftu"
-version = "0.4.2"
+group = "io.github.gaming32"
+version = "0.4.3"
 
 val kotestVersion: String by project.extra
 
@@ -51,47 +51,58 @@ dependencies {
 gradlePlugin {
     plugins {
         register("preprocess") {
-            id = "dev.deftu.gradle.preprocess"
+            id = "io.github.gaming32.gradle.preprocess"
             implementationClass = "com.replaymod.gradle.preprocess.PreprocessPlugin"
         }
 
         register("preprocess-root") {
-            id = "dev.deftu.gradle.preprocess-root"
+            id = "io.github.gaming32.gradle.preprocess-root"
             implementationClass = "com.replaymod.gradle.preprocess.RootPreprocessPlugin"
         }
     }
 }
 
 publishing {
-    val publishingUsername: String? = run {
-        return@run project.findProperty("deftu.publishing.username")?.toString() ?: System.getenv("DEFTU_PUBLISHING_USERNAME")
-    }
-
-    val publishingPassword: String? = run {
-        return@run project.findProperty("deftu.publishing.password")?.toString() ?: System.getenv("DEFTU_PUBLISHING_PASSWORD")
-    }
-
     repositories {
-        mavenLocal()
-        if (publishingUsername != null && publishingPassword != null) {
-            fun MavenArtifactRepository.applyCredentials() {
-                authentication.create<BasicAuthentication>("basic")
-                credentials {
-                    username = publishingUsername
-                    password = publishingPassword
+        fun maven(name: String, releases: String, snapshots: String) {
+            maven {
+                this.name = name
+                url = uri(if (version.toString().endsWith("-SNAPSHOT")) snapshots else releases)
+                credentials(PasswordCredentials::class)
+                authentication {
+                    create<BasicAuthentication>("basic")
                 }
             }
+        }
 
-            maven {
-                name = "DeftuReleases"
-                url = uri("https://maven.deftu.dev/releases")
-                applyCredentials()
-            }
+        maven(
+            "gaming32",
+            "https://maven.jemnetworks.com/releases",
+            "https://maven.jemnetworks.com/snapshots"
+        )
+    }
 
-            maven {
-                name = "DeftuSnapshots"
-                url = uri("https://maven.deftu.dev/snapshots")
-                applyCredentials()
+    publications {
+        create<MavenPublication>("maven") {
+            artifactId = project.name
+            groupId = project.group.toString()
+            version = project.version.toString()
+
+            from(components["java"])
+
+            pom {
+                name = project.name
+                licenses {
+                    license {
+                        name = "GPL-3.0-or-later"
+                        url = "https://github.com/Gaming32/preprocessor/blob/master/LICENSE.md"
+                    }
+                }
+                developers {
+                    developer {
+                        id = "Gaming32"
+                    }
+                }
             }
         }
     }
