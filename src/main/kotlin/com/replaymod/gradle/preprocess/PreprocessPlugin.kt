@@ -134,7 +134,13 @@ class PreprocessPlugin : Plugin<Project> {
             }
 
             project.afterEvaluate {
-                if (ext.disableRemapping.get()) return@afterEvaluate
+                if (ext.disableRemapping.get()) {
+                    tasks.withType<PreprocessTask>().configureEach {
+                        disableRemapping.set(true)
+                    }
+                    return@afterEvaluate
+                }
+
                 val prepareTaskName = "prepareMappingsForPreprocessor"
                 val prepareSourceTaskName = "prepareSourceMappingsForPreprocessor"
                 val prepareDestTaskName = "prepareDestMappingsForPreprocessor"
@@ -160,6 +166,7 @@ class PreprocessPlugin : Plugin<Project> {
                     throw IllegalStateException("Failed to find mappings from $inherited to $project.")
                 }
                 tasks.withType<PreprocessTask>().configureEach {
+                    disableRemapping.set(false)
                     sourceMappings = sourceSrg
                     destinationMappings = destinationSrg
                     dependsOn(prepareSourceTask)

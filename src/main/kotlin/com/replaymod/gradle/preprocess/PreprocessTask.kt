@@ -169,6 +169,10 @@ open class PreprocessTask : DefaultTask() {
     @Optional
     val manageImports = project.objects.property<Boolean>()
 
+    @Input
+    @Optional
+    val disableRemapping = project.objects.property<Boolean>()
+
     @Deprecated("Instead add an entry to `entries`.",
         replaceWith = ReplaceWith(expression = "entry(project.file(file), generated, overwrites)"))
     fun source(file: Any) {
@@ -213,7 +217,7 @@ open class PreprocessTask : DefaultTask() {
 
         val mapping = mapping
         val classpath = classpath
-        if (classpath != null && (mapping != null || sourceMappings != null && destinationMappings != null)) {
+        if (!disableRemapping.get() && classpath != null && (mapping != null || sourceMappings != null && destinationMappings != null)) {
             val mappings = if (mapping != null) {
                 if (sourceMappings != null && destinationMappings != null) {
                     val legacyMap = LegacyMapping.readMappingSet(mapping.toPath(), reverseMapping)
