@@ -134,6 +134,7 @@ class PreprocessPlugin : Plugin<Project> {
             }
 
             project.afterEvaluate {
+                if (ext.disableRemapping.get()) return@afterEvaluate
                 val prepareTaskName = "prepareMappingsForPreprocessor"
                 val prepareSourceTaskName = "prepareSourceMappingsForPreprocessor"
                 val prepareDestTaskName = "prepareDestMappingsForPreprocessor"

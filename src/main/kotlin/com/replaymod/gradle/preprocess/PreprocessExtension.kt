@@ -18,4 +18,5 @@ open class PreprocessExtension(objects: ObjectFactory, val mcVersion: Int) {
     ))
     val patternAnnotation = objects.property<String>()
     val manageImports = objects.property<Boolean>()
+    val disableRemapping = objects.property<Boolean>().convention(false)
 }
