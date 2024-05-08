@@ -209,7 +209,7 @@ open class PreprocessTask : DefaultTask() {
             }
         }
 
-        var mappedSources: Map<String, Pair<String, List<Pair<Int, String>>>>? = null
+        var mappedSources: Map<Pair<Path, String>, List<Pair<Int, String>>>? = null
 
         val mapping = mapping
         val classpath = classpath
@@ -239,17 +239,16 @@ open class PreprocessTask : DefaultTask() {
             val javaTransformer = Transformer(mappings)
             javaTransformer.patternAnnotation = patternAnnotation.orNull
             javaTransformer.manageImports = manageImports.getOrElse(false)
-            javaTransformer.jdkHome = jdkHome.orNull?.asFile
             javaTransformer.remappedJdkHome = remappedjdkHome.orNull?.asFile
             LOGGER.debug("Remap Classpath:")
             javaTransformer.classpath = classpath.files.mapNotNull {
                 if (it.exists()) {
-                    it.absolutePath.also(LOGGER::debug)
+                    it.toPath().toAbsolutePath().also { entry -> LOGGER.info("{}", entry) }
                 } else {
-                    LOGGER.debug("$it (file does not exist)")
+                    LOGGER.debug("{} (file does not exist)", it)
                     null
                 }
-            }.toTypedArray()
+            }
             LOGGER.debug("Remapped Classpath:")
             javaTransformer.remappedClasspath = remappedClasspath?.files?.mapNotNull {
                 if (it.exists()) {

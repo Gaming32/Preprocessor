@@ -34,15 +34,15 @@ java {
 repositories {
     mavenLocal()
     mavenCentral()
-    maven(url = "https://jitpack.io/")
     maven(url = "https://maven.fabricmc.net/")
-    maven(url = "https://maven.deftu.xyz/releases/")
+    maven(url = "https://maven.wagyourtail.xyz/releases/")
+    maven(url = "https://maven.wagyourtail.xyz/snapshots/")
 }
 
 dependencies {
     implementation(gradleApi())
     implementation(localGroovy())
-    implementation("dev.deftu:Remap:0.1.2")
+    implementation("xyz.wagyourtail.unimined:source-remap:1.0.4-SNAPSHOT")
     implementation("net.fabricmc:tiny-mappings-parser:0.2.1.13")
     testImplementation("io.kotest:kotest-runner-junit5-jvm:$kotestVersion")
     testImplementation("io.kotest:kotest-assertions-core-jvm:$kotestVersion")
