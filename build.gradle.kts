@@ -69,9 +69,6 @@ publishing {
                 this.name = name
                 url = uri(if (version.toString().endsWith("-SNAPSHOT")) snapshots else releases)
                 credentials(PasswordCredentials::class)
-                authentication {
-                    create<BasicAuthentication>("basic")
-                }
             }
         }
 
@@ -83,27 +80,7 @@ publishing {
     }
 
     publications {
-        create<MavenPublication>("maven") {
-            artifactId = project.name
-            groupId = project.group.toString()
-            version = project.version.toString()
-
-            from(components["java"])
-
-            pom {
-                name = project.name
-                licenses {
-                    license {
-                        name = "GPL-3.0-or-later"
-                        url = "https://github.com/Gaming32/preprocessor/blob/master/LICENSE.md"
-                    }
-                }
-                developers {
-                    developer {
-                        id = "Gaming32"
-                    }
-                }
-            }
+        create<MavenPublication>("pluginMaven") {
         }
     }
 }
