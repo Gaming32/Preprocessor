@@ -1,27 +1,17 @@
 package com.replaymod.gradle.preprocess
 
-import net.fabricmc.mapping.tree.TinyMappingFactory
-import org.cadixdev.lorenz.MappingSet
-import org.cadixdev.lorenz.io.MappingFormats
-import org.gradle.api.DefaultTask
-import org.gradle.api.GradleException
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.Task
 import org.gradle.api.file.FileCollection
-import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.file.SourceDirectorySet
-import org.gradle.api.provider.Property
 import org.gradle.api.tasks.*
 import org.gradle.api.tasks.compile.AbstractCompile
 import org.gradle.api.tasks.compile.JavaCompile
 
 import org.gradle.kotlin.dsl.*
-import java.io.ByteArrayInputStream
 import java.io.File
-import java.nio.charset.StandardCharsets
 import java.nio.file.Path
-import java.util.stream.Collectors
 
 class PreprocessPlugin : Plugin<Project> {
     override fun apply(project: Project) {
@@ -133,47 +123,6 @@ class PreprocessPlugin : Plugin<Project> {
                 resources.setSrcDirs(listOf(overwriteResources, preprocessResources.map { generatedResources }))
             }
 
-            project.afterEvaluate {
-                if (ext.disableRemapping.get()) {
-                    tasks.withType<PreprocessTask>().configureEach {
-                        disableRemapping.set(true)
-                    }
-                    return@afterEvaluate
-                }
-
-                val prepareTaskName = "prepareMappingsForPreprocessor"
-                val prepareSourceTaskName = "prepareSourceMappingsForPreprocessor"
-                val prepareDestTaskName = "prepareDestMappingsForPreprocessor"
-                val projectIntermediaryMappings = project.intermediaryMappings
-                val inheritedIntermediaryMappings = inherited.intermediaryMappings
-                val projectNotchMappings = project.notchMappings
-                val inheritedNotchMappings = inherited.notchMappings
-                val sourceSrg = project.buildDir.resolve(prepareTaskName).resolve("source.srg")
-                val destinationSrg = project.buildDir.resolve(prepareTaskName).resolve("destination.srg")
-                val (prepareSourceTask, prepareDestTask) = if (inheritedIntermediaryMappings != null && projectIntermediaryMappings != null
-                        && inheritedIntermediaryMappings.type == projectIntermediaryMappings.type) {
-                    Pair(
-                        bakeNamedToIntermediaryMappings(prepareSourceTaskName, inheritedIntermediaryMappings, sourceSrg),
-                        bakeNamedToIntermediaryMappings(prepareDestTaskName, projectIntermediaryMappings, destinationSrg),
-                    )
-                } else if (inheritedNotchMappings != null && projectNotchMappings != null
-                        && inheritedNode.mcVersion == projectNode.mcVersion) {
-                    Pair(
-                        bakeNamedToOfficialMappings(prepareSourceTaskName, inheritedNotchMappings, inheritedIntermediaryMappings, sourceSrg),
-                        bakeNamedToOfficialMappings(prepareDestTaskName, projectNotchMappings, projectIntermediaryMappings, destinationSrg),
-                    )
-                } else {
-                    throw IllegalStateException("Failed to find mappings from $inherited to $project.")
-                }
-                tasks.withType<PreprocessTask>().configureEach {
-                    disableRemapping.set(false)
-                    sourceMappings = sourceSrg
-                    destinationMappings = destinationSrg
-                    dependsOn(prepareSourceTask)
-                    dependsOn(prepareDestTask)
-                }
-            }
-
             project.tasks.register<Copy>("setCoreVersion") {
                 outputs.upToDateWhen { false }
 
@@ -247,173 +196,6 @@ class PreprocessPlugin : Plugin<Project> {
     }
 }
 
-internal class MappingsFile(
-    @Input
-    val type: String,
-    @Input
-    val format: String,
-    @InputFile
-    @PathSensitive(PathSensitivity.NONE)
-    val file: File,
-)
-private fun Mappings.toFile() = MappingsFile(type, format, file)
-
-@CacheableTask
-internal abstract class BakeNamedToIntermediaryMappings : DefaultTask() {
-    @get:Nested
-    abstract val mappings: Property<MappingsFile>
-
-    @get:OutputFile
-    abstract val output: RegularFileProperty
-
-    @TaskAction
-    fun prepare() {
-        val mappings = mappings.get()
-        val mapping = if (mappings.format == "tiny") {
-            val tiny = mappings.file.inputStream().use { TinyMappingFactory.loadWithDetection(it.bufferedReader()) }
-            TinyReader(tiny, "named", if (mappings.type == "searge") "srg" else "intermediary").read()
-        } else {
-            readMappings(mappings.format, mappings.file.toPath())
-        }
-        MappingFormats.SRG.write(mapping, output.get().asFile.toPath())
-    }
-}
-
-@CacheableTask
-internal abstract class BakeNamedToOfficialMappings : DefaultTask() {
-    @get:Nested
-    abstract val mappings: Property<MappingsFile>
-
-    @get:Nested
-    @get:Optional
-    abstract val namedToIntermediaryMappings: Property<MappingsFile?>
-
-    @get:OutputFile
-    abstract val output: RegularFileProperty
-
-    @TaskAction
-    fun prepare() {
-        val mappings = mappings.get()
-        val mapping = if (mappings.format == "tiny") {
-            val tiny = mappings.file.inputStream().use { TinyMappingFactory.loadWithDetection(it.bufferedReader()) }
-            TinyReader(tiny, "named", "official").read()
-        } else {
-            val iMappings = namedToIntermediaryMappings.get()!!
-            val iMapSet = readMappings(iMappings.format, iMappings.file.toPath())
-            val oMapSet = readMappings(mappings.format, mappings.file.toPath())
-            oMapSet.join(iMapSet.reverse()).reverse()
-        }
-        MappingFormats.SRG.write(mapping, output.get().asFile.toPath())
-    }
-}
-
-private fun Project.bakeNamedToIntermediaryMappings(name: String, namedToIntermediaryMappings: Mappings, destination: File): TaskProvider<BakeNamedToIntermediaryMappings> {
-    val task = tasks.register(name, BakeNamedToIntermediaryMappings::class)
-    task.configure {
-        dependsOn(namedToIntermediaryMappings.tasks)
-        mappings.set(namedToIntermediaryMappings.toFile())
-        output.set(destination)
-    }
-    return task
-}
-
-private fun Project.bakeNamedToOfficialMappings(name: String, mappings: Mappings, namedToIntermediaryMappings: Mappings?, destination: File): TaskProvider<BakeNamedToOfficialMappings> {
-    val task = tasks.register(name, BakeNamedToOfficialMappings::class)
-    task.configure {
-        dependsOn(mappings.tasks, namedToIntermediaryMappings?.tasks)
-        this.mappings.set(mappings.toFile())
-        this.namedToIntermediaryMappings.set(namedToIntermediaryMappings?.toFile())
-        output.set(destination)
-    }
-    return task
-}
-
-private fun readMappings(format: String, path: Path): MappingSet {
-    // special handling for TSRG2
-    return if (format == "tsrg2") {
-        // remove lines starting with "tsrg2" (header) and \t\t (method parameter / static indicator)
-        val modifiedTSRG2 = path.toFile().readLines(StandardCharsets.UTF_8).stream().filter {
-            !it.startsWith("tsrg2") && !it.startsWith("\t\t")
-        }.collect(Collectors.joining("\n"))
-
-        val inputStream = ByteArrayInputStream(modifiedTSRG2.toByteArray(StandardCharsets.UTF_8))
-
-        // Proceed as the file would be normal TSRG:
-        // This is fine because the the output of createMcpToSrg specifically only contains two names: `left` and `right`.
-        // The other TSRG2 features, static indicators and parameter names, are irrelevant to our purpose and thus can be safely omitted as well.
-        MappingFormats.byId("tsrg").createReader(inputStream).read()
-    } else {
-        MappingFormats.byId(format).read(path)
-    }
-}
-
-private val Project.intermediaryMappings: Mappings?
-    get() {
-        project.tasks.findByName("genSrgs")?.let { // FG2
-            return Mappings("searge", it.property("mcpToSrg") as File, "srg", listOf(it))
-        }
-        project.tasks.findByName("createMcpToSrg")?.let { // FG3-5
-            val output = it.property("output")
-            // FG3+4 returns a File, FG5 a RegularFileProperty
-            return if (output is File) {
-                Mappings("searge", output, "tsrg", listOf(it))
-            } else {
-                Mappings("searge", (output as RegularFileProperty).get().asFile, "tsrg2", listOf(it))
-            }
-        }
-        mappingsProvider?.maybeGetGroovyProperty("tinyMappingsWithSrg")?.let { // architectury
-            val file = (it as Path).toFile()
-            if (file.exists()) {
-                return Mappings("searge", file, "tiny", emptyList())
-            }
-        }
-        tinyMappings?.let { return Mappings("yarn", it, "tiny", emptyList()) }
-        return null
-    }
-
-data class Mappings(val type: String, val file: File, val format: String, val tasks: List<Task>)
-
-private val Project.notchMappings: Mappings?
-    get() {
-        project.tasks.findByName("extractSrg")?.let { // FG3-5
-            val output = it.property("output")
-            // FG3+4 returns a File, FG5 a RegularFileProperty
-            return if (output is File) {
-                Mappings("notch", output, "tsrg", listOf(it))
-            } else {
-                Mappings("notch", (output as RegularFileProperty).get().asFile, "tsrg2", listOf(it))
-            }
-        }
-        tinyMappings?.let { return Mappings("notch", it, "tiny", emptyList()) }
-        return null
-    }
-
-private val Project.mappingsProvider: Any?
-    get() {
-        val extension = extensions.findByName("loom") ?: extensions.findByName("minecraft") ?: return null
-        if (!extension.javaClass.name.contains("LoomGradleExtension")) return null
-        listOf(
-            "mappingConfiguration", // Fabric Loom 1.1+
-            "mappingsProvider", // Fabric Loom pre 1.1
-        ).forEach { pro ->
-            extension.maybeGetGroovyProperty(pro)?.also { return it }
-        }
-        return null
-    }
-
-private val Project.tinyMappings: File?
-    get() {
-        val mappingsProvider = mappingsProvider ?: return null
-        mappingsProvider.maybeGetGroovyProperty("MAPPINGS_TINY")?.let { return it as File } // loom 0.2.5
-        mappingsProvider.maybeGetGroovyProperty("tinyMappings")?.also {
-            when (it) {
-                is File -> return it // loom 0.2.6
-                is Path -> return it.toFile() // loom 0.10.17
-            }
-        }
-        throw GradleException("loom version not supported by preprocess plugin")
-    }
-
 private val Task.classpath: FileCollection?
     get() = if (this is AbstractCompile) {
         this.classpath
@@ -426,5 +208,3 @@ private val Task.classpath: FileCollection?
             throw RuntimeException(ex)
         }
     }
-
-private fun Any.maybeGetGroovyProperty(name: String) = withGroovyBuilder { metaClass }.hasProperty(this, name)?.getProperty(this)

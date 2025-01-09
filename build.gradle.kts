@@ -15,14 +15,14 @@
  */
 
 plugins {
-    kotlin("jvm") version("1.9.23")
+    kotlin("jvm") version("2.0.21")
     `kotlin-dsl`
     `maven-publish`
     groovy
 }
 
 group = "io.github.gaming32"
-version = "0.4.4"
+version = "0.4.5"
 
 val kotestVersion: String by project.extra
 
@@ -42,8 +42,6 @@ repositories {
 dependencies {
     implementation(gradleApi())
     implementation(localGroovy())
-    implementation("dev.deftu:Remap:0.1.2")
-    implementation("net.fabricmc:tiny-mappings-parser:0.2.1.13")
     testImplementation("io.kotest:kotest-runner-junit5-jvm:$kotestVersion")
     testImplementation("io.kotest:kotest-assertions-core-jvm:$kotestVersion")
 }

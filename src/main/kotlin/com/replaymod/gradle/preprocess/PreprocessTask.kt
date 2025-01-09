@@ -1,23 +1,13 @@
 package com.replaymod.gradle.preprocess
 
-import com.replaymod.gradle.remap.Transformer
-import com.replaymod.gradle.remap.legacy.LegacyMapping
-import com.replaymod.gradle.remap.legacy.LegacyMappingSetModelFactory
-import org.cadixdev.lorenz.MappingSet
-import org.cadixdev.lorenz.io.MappingFormats
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
 import org.gradle.api.file.ConfigurableFileTree
 import org.gradle.api.file.FileCollection
 import org.gradle.api.tasks.*
 import org.gradle.api.tasks.compile.AbstractCompile
-import org.gradle.kotlin.dsl.listProperty
 import org.gradle.kotlin.dsl.mapProperty
 import org.gradle.kotlin.dsl.property
-import org.jetbrains.kotlin.backend.common.peek
-import org.jetbrains.kotlin.backend.common.pop
-import org.jetbrains.kotlin.backend.common.push
-import org.slf4j.LoggerFactory
 import java.io.File
 import java.io.Serializable
 import java.nio.file.Files
@@ -60,8 +50,6 @@ open class PreprocessTask : DefaultTask() {
                 endif = "##endif",
                 eval = "#$$"
         )
-
-        private val LOGGER = LoggerFactory.getLogger(PreprocessTask::class.java)
     }
 
     data class InOut(
@@ -111,22 +99,6 @@ open class PreprocessTask : DefaultTask() {
         get() = entries.firstOrNull()?.source
         set(value) = updateFirstInOut { copy(source = value ?: project.files()) }
 
-    @Deprecated("Instead add an entry to `entries`.")
-    @get:Internal
-    var overwrites: File?
-        get() = entries.firstOrNull()?.overwrites
-        set(value) = updateFirstInOut { copy(overwrites = value) }
-
-    @InputFile
-    @Optional
-    @PathSensitive(PathSensitivity.NONE)
-    var sourceMappings: File? = null
-
-    @InputFile
-    @Optional
-    @PathSensitive(PathSensitivity.NONE)
-    var destinationMappings: File? = null
-
     @InputFile
     @Optional
     @PathSensitive(PathSensitivity.NONE)
@@ -169,10 +141,6 @@ open class PreprocessTask : DefaultTask() {
     @Optional
     val manageImports = project.objects.property<Boolean>()
 
-    @Input
-    @Optional
-    val disableRemapping = project.objects.property<Boolean>()
-
     @Deprecated("Instead add an entry to `entries`.",
         replaceWith = ReplaceWith(expression = "entry(project.file(file), generated, overwrites)"))
     fun source(file: Any) {
@@ -213,86 +181,6 @@ open class PreprocessTask : DefaultTask() {
             }
         }
 
-        var mappedSources: Map<String, Pair<String, List<Pair<Int, String>>>>? = null
-
-        val mapping = mapping
-        val classpath = classpath
-        if (!disableRemapping.get() && classpath != null && (mapping != null || sourceMappings != null && destinationMappings != null)) {
-            val mappings = if (mapping != null) {
-                if (sourceMappings != null && destinationMappings != null) {
-                    val legacyMap = LegacyMapping.readMappingSet(mapping.toPath(), reverseMapping)
-                    val clsMap = legacyMap.splitOffClassMappings()
-                    val srcMap = sourceMappings!!.readMappings()
-                    val dstMap = destinationMappings!!.readMappings()
-                    legacyMap.mergeBoth(
-                            // The inner clsMap is to make the join work, the outer one for custom classes (which are not part of
-                            // dstMap and would otherwise be filtered by the join)
-                            srcMap.mergeBoth(clsMap).join(dstMap.reverse()).mergeBoth(clsMap),
-                            MappingSet.create(LegacyMappingSetModelFactory()))
-                } else {
-                    LegacyMapping.readMappingSet(mapping.toPath(), reverseMapping)
-                }
-            } else {
-                val srcMap = sourceMappings!!.readMappings()
-                val dstMap = destinationMappings!!.readMappings()
-                srcMap.join(dstMap.reverse())
-            }
-            MappingFormats.SRG.write(mappings, project.buildDir.resolve(name).resolve("mapping.srg").toPath().also {
-                Files.createDirectories(it.parent)
-            })
-            val javaTransformer = Transformer(mappings)
-            javaTransformer.patternAnnotation = patternAnnotation.orNull
-            javaTransformer.manageImports = manageImports.getOrElse(false)
-            javaTransformer.jdkHome = jdkHome.orNull?.asFile
-            javaTransformer.remappedJdkHome = remappedjdkHome.orNull?.asFile
-            LOGGER.debug("Remap Classpath:")
-            javaTransformer.classpath = classpath.files.mapNotNull {
-                if (it.exists()) {
-                    it.absolutePath.also(LOGGER::debug)
-                } else {
-                    LOGGER.debug("$it (file does not exist)")
-                    null
-                }
-            }.toTypedArray()
-            LOGGER.debug("Remapped Classpath:")
-            javaTransformer.remappedClasspath = remappedClasspath?.files?.mapNotNull {
-                if (it.exists()) {
-                    it.absolutePath.also(LOGGER::debug)
-                } else {
-                    LOGGER.debug("$it (file does not exist)")
-                    null
-                }
-            }?.toTypedArray()
-            val sources = mutableMapOf<String, String>()
-            val processedSources = mutableMapOf<String, String>()
-            sourceFiles.forEach { (relPath, inBase, _, _) ->
-                if (relPath.endsWith(".java") || relPath.endsWith(".kt")) {
-                    val text = String(Files.readAllBytes(inBase.resolve(relPath)))
-                    sources[relPath] = text
-                    val lines = text.lines()
-                    val kws = keywords.get().entries.find { (ext, _) -> relPath.endsWith(ext) }
-                    if (kws != null) {
-                        processedSources[relPath] = CommentPreprocessor(vars.get()).convertSource(
-                                kws.value,
-                                lines,
-                                lines.map { Pair(it, emptyList()) },
-                                relPath
-                        ).joinToString("\n")
-                    }
-                }
-            }
-            val overwritesFiles = entries
-                .mapNotNull { it.overwrites }
-                .flatMap { base -> project.fileTree(base).map { Pair(base.toPath(), it) } }
-            overwritesFiles.forEach { (base, file) ->
-                if (file.name.endsWith(".java") || file.name.endsWith(".kt")) {
-                    val relPath = base.relativize(file.toPath())
-                    processedSources[relPath.toString()] = file.readText()
-                }
-            }
-            mappedSources = javaTransformer.remap(sources, processedSources)
-        }
-
         project.delete(entries.map { it.generated })
 
         val commentPreprocessor = CommentPreprocessor(vars.get())
@@ -305,13 +193,7 @@ open class PreprocessTask : DefaultTask() {
             val kws = keywords.get().entries.find { (ext, _) -> file.name.endsWith(ext) }
             if (kws != null) {
                 val javaTransform = { lines: List<String> ->
-                    mappedSources?.get(relPath)?.let { (source, errors) ->
-                        val errorsByLine = mutableMapOf<Int, MutableList<String>>()
-                        for ((line, error) in errors) {
-                            errorsByLine.getOrPut(line, ::mutableListOf).add(error)
-                        }
-                        source.lines().mapIndexed { index: Int, line: String -> Pair(line, errorsByLine[index] ?: emptyList<String>()) }
-                    } ?: lines.map { Pair(it, emptyList()) }
+                    lines.map { Pair(it, emptyList<String>()) }
                 }
                 commentPreprocessor.convertFile(kws.value, file, outFile, javaTransform)
             } else {
@@ -425,8 +307,8 @@ class CommentPreprocessor(
             val trimmed = line.trim()
             val mapped = if (trimmed.startsWith(kws.`if`)) {
                 val result = evalCondition(trimmed.substring(kws.`if`.length))
-                stack.push(IfStackEntry(result, n, elseFound = false, trueFound = result))
-                indentStack.push(line.indentation)
+                stack.add(IfStackEntry(result, n, elseFound = false, trueFound = result))
+                indentStack.add(line.indentation)
                 active = active && result
                 line
             } else if (trimmed.startsWith(kws.elseif)) {
@@ -437,17 +319,17 @@ class CommentPreprocessor(
                     throw ParserException("Unexpected elseif after else in line $n of $fileName")
                 }
 
-                indentStack.pop()
-                indentStack.push(line.indentation)
+                indentStack.removeLast()
+                indentStack.add(line.indentation)
 
                 active = if (stack.last().trueFound) {
-                    val last = stack.pop()
-                    stack.push(last.copy(currentValue = false))
+                    val last = stack.removeLast()
+                    stack.add(last.copy(currentValue = false))
                     false
                 } else {
                     val result = evalCondition(trimmed.substring(kws.elseif.length))
-                    stack.pop()
-                    stack.push(IfStackEntry(result, n, elseFound = false, trueFound = result))
+                    stack.removeLast()
+                    stack.add(IfStackEntry(result, n, elseFound = false, trueFound = result))
                     stack.all { it.currentValue }
                 }
                 line
@@ -455,24 +337,24 @@ class CommentPreprocessor(
                 if (stack.isEmpty()) {
                     throw ParserException("Unexpected else in line $n of $fileName")
                 }
-                val entry = stack.pop()
-                stack.push(IfStackEntry(!entry.trueFound, n, elseFound = true, trueFound = entry.trueFound))
-                indentStack.pop()
-                indentStack.push(line.indentation)
+                val entry = stack.removeLast()
+                stack.add(IfStackEntry(!entry.trueFound, n, elseFound = true, trueFound = entry.trueFound))
+                indentStack.removeLast()
+                indentStack.add(line.indentation)
                 active = stack.all { it.currentValue }
                 line
             } else if (trimmed.startsWith(kws.ifdef)) {
                 val result = vars.containsKey(trimmed.substring(kws.ifdef.length))
-                stack.push(IfStackEntry(result, n, elseFound = false, trueFound = result))
-                indentStack.push(line.indentation)
+                stack.add(IfStackEntry(result, n, elseFound = false, trueFound = result))
+                indentStack.add(line.indentation)
                 active = active && result
                 line
             } else if (trimmed.startsWith(kws.endif)) {
                 if (stack.isEmpty()) {
                     throw ParserException("Unexpected endif in line $n of $fileName")
                 }
-                stack.pop()
-                indentStack.pop()
+                stack.removeLast()
+                indentStack.removeLast()
                 active = stack.all { it.currentValue }
                 line
             } else if (trimmed.startsWith(kws.disableRemap)) {
@@ -504,7 +386,7 @@ class CommentPreprocessor(
                         originalLine
                     }
                 } else {
-                    val currIndent = indentStack.peek()!!
+                    val currIndent = indentStack.last()
                     if (trimmed.isEmpty()) {
                         " ".repeat(currIndent) + kws.eval
                     } else if (!trimmed.startsWith(kws.eval) && currIndent <= line.indentation) {
@@ -529,7 +411,7 @@ class CommentPreprocessor(
             mapped
         }.also {
             if (stack.isNotEmpty()) {
-                throw ParserException("Missing endif on line ${stack.peek()?.lineno} of $fileName")
+                throw ParserException("Missing endif on line ${stack.lastOrNull()?.lineno} of $fileName")
             }
         }
     }
