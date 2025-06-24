@@ -23,12 +23,10 @@ class PreprocessPlugin : Plugin<Project> {
 
         project.evaluationDependsOn(parent.path)
         val rootExtension = parent.extensions.getByType<RootPreprocessExtension>()
-        val graph = rootExtension.rootNode ?: throw IllegalStateException("Preprocess graph was not configured.")
-        val projectNode = graph.findNode(project.name) ?: throw IllegalStateException("Prepocess graph does not contain ${project.name}.")
+        val mcVersion = rootExtension.getVersion(project.name) ?: throw IllegalStateException("Prepocess graph does not contain ${project.name}.")
 
         val coreProjectFile = project.file("../mainProject")
         val coreProject = coreProjectFile.readText().trim()
-        val mcVersion = projectNode.mcVersion
         project.extra["mcVersion"] = mcVersion
         val ext = project.extensions.create("preprocess", PreprocessExtension::class, project.objects, mcVersion)
 
@@ -46,12 +44,10 @@ class PreprocessPlugin : Plugin<Project> {
                 }
             }
         } else {
-            val inheritedLink = projectNode.links.find { it.findNode(coreProject) != null }
-            val inheritedNode = inheritedLink ?: graph.findParent(projectNode)!!
-            val inherited = parent.evaluationDependsOn(inheritedNode.project)
+            val core = parent.evaluationDependsOn(coreProject)
 
             project.the<SourceSetContainer>().configureEach {
-                val inheritedSourceSet = inherited.the<SourceSetContainer>()[name]
+                val inheritedSourceSet = core.the<SourceSetContainer>()[name]
                 val cName = if (name == "main") "" else name.capitalize()
                 val overwritesKotlin = project.file("src/$name/kotlin").also { it.mkdirs() }
                 val overwritesJava = project.file("src/$name/java").also { it.mkdirs() }
@@ -62,23 +58,23 @@ class PreprocessPlugin : Plugin<Project> {
                 val generatedResources = preprocessedRoot.resolve("resources")
 
                 val preprocessCode = project.tasks.register<PreprocessTask>("preprocess${cName}Code") {
-                    inherited.tasks.findByPath("preprocess${cName}Code")?.let { dependsOn(it) }
+                    core.tasks.findByPath("preprocess${cName}Code")?.let { dependsOn(it) }
                     entry(
-                        source = inherited.files(inheritedSourceSet.java.srcDirs),
+                        source = core.files(inheritedSourceSet.java.srcDirs),
                         overwrites = overwritesJava,
                         generated = generatedJava,
                     )
                     if (kotlin) {
                         entry(
-                            source = inherited.files(inheritedSourceSet.withGroovyBuilder { getProperty("kotlin") as SourceDirectorySet }.srcDirs.filter {
+                            source = core.files(inheritedSourceSet.withGroovyBuilder { getProperty("kotlin") as SourceDirectorySet }.srcDirs.filter {
                                 it.endsWith("kotlin")
                             }),
                             overwrites = overwritesKotlin,
                             generated = generatedKotlin,
                         )
                     }
-                    jdkHome.set((inherited.tasks["compileJava"] as JavaCompile).javaCompiler.map { it.metadata.installationPath })
-                    classpath = inherited.tasks["compile${cName}${if (kotlin) "Kotlin" else "Java"}"].classpath
+                    jdkHome.set((core.tasks["compileJava"] as JavaCompile).javaCompiler.map { it.metadata.installationPath })
+                    classpath = core.tasks["compile${cName}${if (kotlin) "Kotlin" else "Java"}"].classpath
                     vars.convention(ext.vars)
                     keywords.convention(ext.keywords)
                     patternAnnotation.convention(ext.patternAnnotation)
@@ -102,9 +98,9 @@ class PreprocessPlugin : Plugin<Project> {
                 }
 
                 val preprocessResources = project.tasks.register<PreprocessTask>("preprocess${cName}Resources") {
-                    inherited.tasks.findByPath("preprocess${cName}Resources")?.let { dependsOn(it) }
+                    core.tasks.findByPath("preprocess${cName}Resources")?.let { dependsOn(it) }
                     entry(
-                        source = inherited.files(inheritedSourceSet.resources.srcDirs),
+                        source = core.files(inheritedSourceSet.resources.srcDirs),
                         overwrites = overwriteResources,
                         generated = generatedResources,
                     )
@@ -139,7 +135,7 @@ class PreprocessPlugin : Plugin<Project> {
                     // If there is an overwrite in B, we need to preserve A's source version in A's overwrites.
                     // If there is an overwrite in C, we need to preserve B's version in B's overwrites and get
                     // rid of C's overwrite since it will now be stored in the main sources.
-                    fun preserveOverwrites(project: Project, toBePreserved: List<Path>?) {
+                    tailrec fun preserveOverwrites(project: Project, toBePreserved: List<Path>?) {
                         val overwrites = project.file("src").toPath()
                         val overwritten = overwrites.toFile()
                                 .walk()
@@ -151,7 +147,7 @@ class PreprocessPlugin : Plugin<Project> {
                         // as they have yet to be copied into the main sources.
                         if (toBePreserved != null) {
                             val source = if (project.name == coreProject) {
-                                project.parent!!.file( "src").toPath()
+                                project.parent!!.file("src").toPath()
                             } else {
                                 project.buildDir.toPath().resolve("preprocessed")
                             }
@@ -165,10 +161,7 @@ class PreprocessPlugin : Plugin<Project> {
                         }
 
                         if (project.name != coreProject) {
-                            val node = graph.findNode(project.name)!!
-                            val nextLink = node.links.find { it.findNode(coreProject) != null }
-                            val nextNode = nextLink ?: graph.findParent(node)!!
-                            val nextProject = parent.project(nextNode.project)
+                            val nextProject = parent.project(coreProject)
                             preserveOverwrites(nextProject, overwritten)
                         }
                     }
