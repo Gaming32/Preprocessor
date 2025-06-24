@@ -22,7 +22,7 @@ plugins {
 }
 
 group = "io.github.gaming32"
-version = "0.4.5"
+version = "0.4.6"
 
 val kotestVersion: String by project.extra
 
