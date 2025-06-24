@@ -1,7 +1,5 @@
 package com.replaymod.gradle.preprocess
 
-import java.io.File
-
 open class RootPreprocessExtension : ProjectGraphNodeDSL {
     var rootNode: ProjectGraphNode? = null
         get() = field ?: linkNodes()?.also { field = it }
@@ -17,9 +15,9 @@ open class RootPreprocessExtension : ProjectGraphNodeDSL {
         val visited = mutableSetOf<Node>()
         fun Node.breadthFirstSearch(): ProjectGraphNode {
             val graphNode = ProjectGraphNode(project, mcVersion)
-            links.forEach { (otherNode, extraMappings) ->
+            links.forEach { otherNode ->
                 if (visited.add(otherNode)) {
-                    graphNode.links.add(Pair(otherNode.breadthFirstSearch(), extraMappings))
+                    graphNode.links.add(otherNode.breadthFirstSearch())
                 }
             }
             return graphNode
@@ -27,9 +25,8 @@ open class RootPreprocessExtension : ProjectGraphNodeDSL {
         return first.breadthFirstSearch()
     }
 
-    override fun addNode(project: String, mcVersion: Int, mappings: String, extraMappings: File?, invertMappings: Boolean): ProjectGraphNode {
+    override fun addNode(project: String, mcVersion: Int): ProjectGraphNode {
         check(rootNode == null) { "Only one root node may be set." }
-        check(extraMappings == null) { "Cannot add extra mappings to root node." }
         return ProjectGraphNode(project, mcVersion).also { rootNode = it }
     }
 }
@@ -38,42 +35,42 @@ class Node(
     val project: String,
     val mcVersion: Int,
 ) {
-    internal val links = mutableMapOf<Node, Pair<File?, Boolean>>()
+    internal val links = mutableSetOf<Node>()
 
-    fun link(other: Node, extraMappings: File? = null) {
-        this.links[other] = Pair(extraMappings, false)
-        other.links[this] = Pair(extraMappings, true)
+    fun link(other: Node) {
+        this.links.add(other)
+        other.links.add(this)
     }
 }
 
 interface ProjectGraphNodeDSL {
-    operator fun String.invoke(mcVersion: Int, mappings: String, extraMappings: File? = null, configure: ProjectGraphNodeDSL.() -> Unit = {}) {
-        addNode(this, mcVersion, mappings, extraMappings).configure()
+    operator fun String.invoke(mcVersion: Int, configure: ProjectGraphNodeDSL.() -> Unit = {}) {
+        addNode(this, mcVersion).configure()
     }
 
-    fun addNode(project: String, mcVersion: Int, mappings: String, extraMappings: File? = null, invertMappings: Boolean = false): ProjectGraphNodeDSL
+    fun addNode(project: String, mcVersion: Int): ProjectGraphNodeDSL
 }
 
 open class ProjectGraphNode(
     val project: String,
     val mcVersion: Int,
-    val links: MutableList<Pair<ProjectGraphNode, Pair<File?, Boolean>>> = mutableListOf()
+    val links: MutableList<ProjectGraphNode> = mutableListOf()
 ) : ProjectGraphNodeDSL {
-    override fun addNode(project: String, mcVersion: Int, mappings: String, extraMappings: File?, invertMappings: Boolean): ProjectGraphNodeDSL =
-            ProjectGraphNode(project, mcVersion).also { links.add(Pair(it, Pair(extraMappings, invertMappings))) }
+    override fun addNode(project: String, mcVersion: Int): ProjectGraphNodeDSL =
+            ProjectGraphNode(project, mcVersion).also { links.add(it) }
 
     fun findNode(project: String): ProjectGraphNode? = if (project == this.project) {
         this
     } else {
-        links.map { it.first.findNode(project) }.find { it != null }
+        links.map { it.findNode(project) }.find { it != null }
     }
 
-    fun findParent(node: ProjectGraphNode): Pair<ProjectGraphNode, Pair<File?, Boolean>>? = if (node == this) {
+    fun findParent(node: ProjectGraphNode): ProjectGraphNode? = if (node == this) {
         null
     } else {
-        links.map { (child, extraMappings) ->
+        links.map { child ->
             if (child == node) {
-                Pair(this, extraMappings)
+                this
             } else {
                 child.findParent(node)
             }

@@ -15,8 +15,6 @@ import java.nio.file.Path
 import java.util.regex.Pattern
 
 data class Keywords(
-        val disableRemap: String,
-        val enableRemap: String,
         val `if`: String,
         val ifdef: String,
         val elseif: String,
@@ -30,8 +28,6 @@ open class PreprocessTask : DefaultTask() {
     companion object {
         @JvmStatic
         val DEFAULT_KEYWORDS = Keywords(
-                disableRemap = "//#disable-remap",
-                enableRemap = "//#enable-remap",
                 `if` = "//#if",
                 ifdef = "//#ifdef",
                 elseif = "//#elseif",
@@ -41,8 +37,6 @@ open class PreprocessTask : DefaultTask() {
         )
         @JvmStatic
         val CFG_KEYWORDS = Keywords(
-                disableRemap = "##disable-remap",
-                enableRemap = "##enable-remap",
                 `if` = "##if",
                 ifdef = "##ifdef",
                 elseif = "##elseif",
@@ -99,33 +93,15 @@ open class PreprocessTask : DefaultTask() {
         get() = entries.firstOrNull()?.source
         set(value) = updateFirstInOut { copy(source = value ?: project.files()) }
 
-    @InputFile
-    @Optional
-    @PathSensitive(PathSensitivity.NONE)
-    var mapping: File? = null
-
-    @Input
-    var reverseMapping: Boolean = false
-
     @InputDirectory
     @Optional
     @PathSensitive(PathSensitivity.RELATIVE)
     val jdkHome = project.objects.directoryProperty()
 
-    @InputDirectory
-    @Optional
-    @PathSensitive(PathSensitivity.RELATIVE)
-    val remappedjdkHome = project.objects.directoryProperty()
-
     @InputFiles
     @Optional
     @CompileClasspath
     var classpath: FileCollection? = null
-
-    @InputFiles
-    @Optional
-    @CompileClasspath
-    var remappedClasspath: FileCollection? = null
 
     @Input
     val vars = project.objects.mapProperty<String, Int>()
@@ -192,10 +168,7 @@ open class PreprocessTask : DefaultTask() {
             }
             val kws = keywords.get().entries.find { (ext, _) -> file.name.endsWith(ext) }
             if (kws != null) {
-                val javaTransform = { lines: List<String> ->
-                    lines.map { Pair(it, emptyList<String>()) }
-                }
-                commentPreprocessor.convertFile(kws.value, file, outFile, javaTransform)
+                commentPreprocessor.convertFile(kws.value, file, outFile)
             } else {
                 project.copy {
                     from(file)
@@ -283,11 +256,10 @@ class CommentPreprocessor(
     private val String.indentation: Int
         get() = takeWhile { it == ' ' }.length
 
-    fun convertSource(kws: Keywords, lines: List<String>, remapped: List<Pair<String, List<String>>>, fileName: String): List<String> {
+    fun convertSource(kws: Keywords, lines: List<String>, fileName: String): List<String> {
         val stack = mutableListOf<IfStackEntry>()
         val indentStack = mutableListOf<Int>()
         var active = true
-        var remapActive = true
         var n = 0
 
         fun evalCondition(condition: String): Boolean {
@@ -300,9 +272,7 @@ class CommentPreprocessor(
             }
         }
 
-        return lines.zip(remapped).map { (originalLine, lineMapped) ->
-            val (line, errors) = lineMapped
-            var ignoreErrors = false
+        return lines.map { line ->
             n++
             val trimmed = line.trim()
             val mapped = if (trimmed.startsWith(kws.`if`)) {
@@ -357,18 +327,6 @@ class CommentPreprocessor(
                 indentStack.removeLast()
                 active = stack.all { it.currentValue }
                 line
-            } else if (trimmed.startsWith(kws.disableRemap)) {
-                if (!remapActive) {
-                    throw ParserException("Remapping already disabled in line $n of $fileName")
-                }
-                remapActive = false
-                line
-            } else if (trimmed.startsWith(kws.enableRemap)) {
-                if (remapActive) {
-                    throw ParserException("Remapping not disabled in line $n of $fileName")
-                }
-                remapActive = true
-                line
             } else {
                 if (active) {
                     if (trimmed.startsWith(kws.eval)) {
@@ -379,11 +337,8 @@ class CommentPreprocessor(
                                 it
                             }
                         }
-                    } else if (remapActive) {
-                        line
                     } else {
-                        ignoreErrors = true
-                        originalLine
+                        line
                     }
                 } else {
                     val currIndent = indentStack.last()
@@ -392,20 +347,13 @@ class CommentPreprocessor(
                     } else if (!trimmed.startsWith(kws.eval) && currIndent <= line.indentation) {
                         // Line has been disabled, so we want to use its non-remapped content instead.
                         // For one, the remapped content would be useless anyway since it's commented out
-                        // and, more importantly, if we do not preserve it, we might permanently loose it as the
+                        // and, more importantly, if we do not preserve it, we might permanently lose it as the
                         // remap process is only guaranteed to work on code which compiles and since we're
                         // just about to comment it out, it probably doesn't compile.
-                        ignoreErrors = true
-                        " ".repeat(currIndent) + kws.eval + " " + originalLine.substring(currIndent)
+                        " ".repeat(currIndent) + kws.eval + " " + line.substring(currIndent)
                     } else {
                         line
                     }
-                }
-            }
-            if (errors.isNotEmpty() && !ignoreErrors) {
-                fail = true
-                for (message in errors) {
-                    System.err.println("$fileName:$n: $message")
                 }
             }
             mapped
@@ -416,12 +364,11 @@ class CommentPreprocessor(
         }
     }
 
-    fun convertFile(kws: Keywords, inFile: File, outFile: File, remap: ((List<String>) -> List<Pair<String, List<String>>>)? = null) {
+    fun convertFile(kws: Keywords, inFile: File, outFile: File) {
         val string = inFile.readText()
         var lines = string.lines()
-        val remapped = remap?.invoke(lines) ?: lines.map { Pair(it, emptyList()) }
         try {
-            lines = convertSource(kws, lines, remapped, inFile.path)
+            lines = convertSource(kws, lines, inFile.path)
         } catch (e: Throwable) {
             if (e is ParserException) {
                 throw e

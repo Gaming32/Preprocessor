@@ -46,10 +46,8 @@ class PreprocessPlugin : Plugin<Project> {
                 }
             }
         } else {
-            val inheritedLink = projectNode.links.find { it.first.findNode(coreProject) != null }
-            val (inheritedNode, extraMappings) = inheritedLink ?: graph.findParent(projectNode)!!
-            val (mappingFile, mappingFileInverted) = extraMappings
-            val reverseMappings = (inheritedLink != null) != mappingFileInverted
+            val inheritedLink = projectNode.links.find { it.findNode(coreProject) != null }
+            val inheritedNode = inheritedLink ?: graph.findParent(projectNode)!!
             val inherited = parent.evaluationDependsOn(inheritedNode.project)
 
             project.the<SourceSetContainer>().configureEach {
@@ -80,11 +78,7 @@ class PreprocessPlugin : Plugin<Project> {
                         )
                     }
                     jdkHome.set((inherited.tasks["compileJava"] as JavaCompile).javaCompiler.map { it.metadata.installationPath })
-                    remappedjdkHome.set((project.tasks["compileJava"] as JavaCompile).javaCompiler.map { it.metadata.installationPath })
                     classpath = inherited.tasks["compile${cName}${if (kotlin) "Kotlin" else "Java"}"].classpath
-                    remappedClasspath = project.tasks["compile${cName}${if (kotlin) "Kotlin" else "Java"}"].classpath
-                    mapping = mappingFile
-                    reverseMapping = reverseMappings
                     vars.convention(ext.vars)
                     keywords.convention(ext.keywords)
                     patternAnnotation.convention(ext.patternAnnotation)
@@ -172,8 +166,8 @@ class PreprocessPlugin : Plugin<Project> {
 
                         if (project.name != coreProject) {
                             val node = graph.findNode(project.name)!!
-                            val nextLink = node.links.find { it.first.findNode(coreProject) != null }
-                            val (nextNode, _) = nextLink ?: graph.findParent(node)!!
+                            val nextLink = node.links.find { it.findNode(coreProject) != null }
+                            val nextNode = nextLink ?: graph.findParent(node)!!
                             val nextProject = parent.project(nextNode.project)
                             preserveOverwrites(nextProject, overwritten)
                         }
